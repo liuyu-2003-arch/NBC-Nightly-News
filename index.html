@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBC English Learning Hub</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 40px 20px; background: #f9f9f9; }
+        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; gap: 20px; }
+        .card img { width: 160px; height: 90px; object-fit: cover; border-radius: 4px; background: #eee; }
+        .content h2 { margin: 0 0 10px 0; font-size: 1.2rem; }
+        .content a { text-decoration: none; color: #333; }
+        .content a:hover { color: #1890ff; }
+        .date { color: #888; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <h1>English Learning with NBC Nightly News</h1>
+    <div id="article-list">加载中...</div>
+
+    <script>
+        fetch('articles.json')
+            .then(response => response.json())
+            .then(data => {
+                const list = document.getElementById('article-list');
+                list.innerHTML = '';
+                data.forEach(item => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    // 使用 YouTube 缩略图
+                    const thumbUrl = `https://img.youtube.com/vi/${item.video_id}/mqdefault.jpg`;
+
+                    card.innerHTML = `
+                        <img src="${thumbUrl}" alt="Thumbnail">
+                        <div class="content">
+                            <h2><a href="${item.path}">${item.title}</a></h2>
+                            <div class="date">${item.date}</div>
+                        </div>
+                    `;
+                    list.appendChild(card);
+                });
+            })
+            .catch(e => document.getElementById('article-list').innerHTML = '暂无文章或加载失败');
+    </script>
+</body>
+</html>

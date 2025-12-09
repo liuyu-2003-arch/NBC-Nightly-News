@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBC Nightly News 英语学习助手</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background-color: #f4f4f4;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 顶部控制栏 */
+        .header {
+            background-color: #fff;
+            padding: 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            z-index: 10;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+        }
+
+        button {
+            padding: 8px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        /* 字幕滚动区域 */
+        #lyrics-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            padding-bottom: 220px; /* 为底部视频留出空间 */
+            text-align: center;
+            scroll-behavior: smooth;
+        }
+
+        .subtitle-line {
+            padding: 15px;
+            margin: 10px auto;
+            max-width: 800px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #555;
+            background: white;
+            border-left: 4px solid transparent;
+        }
+
+        .subtitle-line:hover {
+            background-color: #e9ecef;
+        }
+
+        /* 高亮样式 */
+        .subtitle-line.active {
+            color: #000;
+            font-weight: bold;
+            font-size: 1.1em;
+            background-color: #e3f2fd;
+            border-left: 4px solid #007bff;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transform: scale(1.02);
+        }
+
+        .time-tag {
+            font-size: 0.8em;
+            color: #999;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .text-content {
+            line-height: 1.6;
+            white-space: pre-wrap; /* 保留换行 */
+        }
+
+        /* 底部固定视频区域 */
+        .footer-player {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 200px; /* 视频高度 */
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.2);
+            z-index: 20;
+        }
+
+        /* 响应式调整 */
+        @media (max-width: 600px) {
+            .footer-player { height: 180px; }
+            #lyrics-container { padding-bottom: 200px; }
+            input[type="text"] { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <input type="text" id="videoUrl" placeholder="粘贴 YouTube 视频链接 (例如: https://youtu.be/...)" value="https://www.youtube.com/watch?v=rcqpkftnfeY">
+        <input type="file" id="srtFile" accept=".srt">
+        <button onclick="initApp()">开始学习 / Load</button>
+        <span style="font-size: 12px; color: #666;">* 提示: 点击字幕可跳转播放</span>
+    </div>
+
+    <div id="lyrics-container">
+        <div style="margin-top: 50px; color: #888;">
+            请在上方输入视频链接并上传字幕文件，点击“开始学习”生成内容。
+        </div>
+    </div>
+
+    <div class="footer-player">
+        <div id="player"></div>
+    </div>
+
+    <script>
+        // 加载 YouTube IFrame Player API 代码
+        var tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        var firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+        var player;
+        var subtitles = [];
+        var timerInterval;
+        var isAutoScrolling = true;
+
+        // 1. YouTube API 准备好后会调用此函数，但我们等用户点击按钮再初始化播放器
+        function onYouTubeIframeAPIReady() {
+            // API已就绪
+        }
+
+        // 2. 主初始化函数
+        function initApp() {
+            const urlInput = document.getElementById('videoUrl').value;
+            const fileInput = document.getElementById('srtFile').files[0];
+
+            if (!urlInput) {
+                alert("请输入 YouTube 视频链接");
+                return;
+            }
+
+            // 解析 Video ID
+            const videoId = extractVideoID(urlInput);
+            if (!videoId) {
+                alert("无法解析 YouTube 链接，请检查格式");
+                return;
+            }
+
+            // 如果有文件，解析字幕；如果没有，仅加载视频
+            if (fileInput) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const content = e.target.result;
+                    subtitles = parseSRT(content);
+                    renderSubtitles(subtitles);
+                    loadPlayer(videoId);
+                };
+                reader.readAsText(fileInput);
+            } else {
+                loadPlayer(videoId);
+            }
+        }
+
+        // 3. 加载或更新 YouTube 播放器
+        function loadPlayer(videoId) {
+            if (player) {
+                player.loadVideoById(videoId);
+            } else {
+                player = new YT.Player('player', {
+                    height: '100%',
+                    width: '100%', // 这里你可以调整宽度，例如 '600px' 或保持 100% 充满底部
+                    videoId: videoId,
+                    playerVars: {
+                        'playsinline': 1,
+                        'controls': 1
+                    },
+                    events: {
+                        'onReady': onPlayerReady,
+                        'onStateChange': onPlayerStateChange
+                    }
+                });
+            }
+        }
+
+        // 4. 播放器就绪
+        function onPlayerReady(event) {
+            startSyncLoop();
+        }
+
+        function onPlayerStateChange(event) {
+            if (event.data == YT.PlayerState.PLAYING) {
+                startSyncLoop();
+            } else {
+                stopSyncLoop();
+            }
+        }
+
+        // 5. 字幕同步逻辑
+        function startSyncLoop() {
+            stopSyncLoop();
+            timerInterval = setInterval(() => {
+                if (!player || !player.getCurrentTime) return;
+
+                const currentTime = player.getCurrentTime();
+                highlightSubtitle(currentTime);
+            }, 100); // 每100毫秒检查一次
+        }
+
+        function stopSyncLoop() {
+            clearInterval(timerInterval);
+        }
+
+        function highlightSubtitle(time) {
+            const container = document.getElementById('lyrics-container');
+            const lines = document.getElementsBy classList="subtitle-line";
+
+            // 找到当前时间对应的字幕索引
+            const activeIndex = subtitles.findIndex(sub => time >= sub.start && time <= sub.end);
+
+            if (activeIndex !== -1) {
+                // 移除旧的高亮
+                const currentActive = document.querySelector('.subtitle-line.active');
+                if (currentActive && currentActive.dataset.index != activeIndex) {
+                    currentActive.classList.remove('active');
+                }
+
+                // 添加新的高亮
+                const newActive = document.getElementById(`sub-${activeIndex}`);
+                if (newActive && !newActive.classList.contains('active')) {
+                    newActive.classList.add('active');
+
+                    // 自动滚动
+                    if (isAutoScrolling) {
+                        newActive.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }
+            }
+        }
+
+        // 6. 解析 SRT 文件
+        function parseSRT(data) {
+            const subs = [];
+            // 统一换行符并按空行分割块
+            const blocks = data.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n\n');
+
+            blocks.forEach(block => {
+                const lines = block.trim().split('\n');
+                if (lines.length >= 3) {
+                    // 查找时间轴行 (例如 00:00:01,040 --> 00:00:12,719)
+                    const timeLineIndex = lines.findIndex(l => l.includes('-->'));
+                    if (timeLineIndex !== -1) {
+                        const timeLine = lines[timeLineIndex];
+                        const textLines = lines.slice(timeLineIndex + 1);
+
+                        const [startStr, endStr] = timeLine.split('-->');
+
+                        // 简单的解析，保留所有文本内容（包括中英文）
+                        // 如果需要可以进一步处理 textLines 来区分中英文
+                        const text = textLines.join('\n');
+
+                        subs.push({
+                            start: timeToSeconds(startStr.trim()),
+                            end: timeToSeconds(endStr.trim()),
+                            text: text
+                        });
+                    }
+                }
+            });
+            return subs;
+        }
+
+        // 转换时间格式 00:00:01,040 -> 秒数
+        function timeToSeconds(timeStr) {
+            const parts = timeStr.split(':');
+            const secondsParts = parts[2].split(',');
+
+            const hours = parseInt(parts[0], 10);
+            const minutes = parseInt(parts[1], 10);
+            const seconds = parseInt(secondsParts[0], 10);
+            const ms = parseInt(secondsParts[1], 10);
+
+            return (hours * 3600) + (minutes * 60) + seconds + (ms / 1000);
+        }
+
+        // 7. 渲染字幕到页面
+        function renderSubtitles(subs) {
+            const container = document.getElementById('lyrics-container');
+            container.innerHTML = ''; // 清空
+
+            subs.forEach((sub, index) => {
+                const div = document.createElement('div');
+                div.className = 'subtitle-line';
+                div.id = `sub-${index}`;
+                div.dataset.index = index;
+                div.onclick = () => {
+                    player.seekTo(sub.start);
+                    player.playVideo();
+                };
+
+                // 简单的格式化，把 去掉如果需要，或者保留
+                // 你的源文件似乎包含 ，如果你想隐藏它，可以使用 replace
+                let displayHtml = sub.text.replace(/\/g, '');
+
+                div.innerHTML = `
+                    <span class="time-tag">#${index + 1}</span>
+                    <div class="text-content">${displayHtml}</div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // 辅助：从 URL 提取 Video ID
+        function extractVideoID(url) {
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+            const match = url.match(regExp);
+            return (match && match[2].length === 11) ? match[2] : null;
+        }
+
+        // 监听滚动，如果用户手动滚动，暂时停止自动滚动（可选功能，此处为简化未完全实现复杂的防抖逻辑，但保留结构）
+        // document.getElementById('lyrics-container').addEventListener('scroll', () => { ... });
+    </script>
+</body>
+</html>
